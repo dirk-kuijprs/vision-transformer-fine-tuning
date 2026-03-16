@@ -17,7 +17,8 @@ from torchvision.transforms import (
     RandomHorizontalFlip,
     RandomResizedCrop,
     Resize,
-    ToTensor
+    ToTensor,
+    RandAugment
 )
 import numpy as np
 import evaluate
@@ -34,6 +35,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size per GPU.")
     parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs.")
     parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate.")
+    parser.add_argument("--report_to", type=str, default="wandb", help="Logging tool (wandb, tensorboard, etc.).")
     return parser.parse_args()
 
 def main():
@@ -54,9 +56,11 @@ def main():
     normalize = Normalize(mean=image_processor.image_mean, std=image_processor.image_std)
     size = (image_processor.size["height"], image_processor.size["width"])
 
+    # Advanced Data Augmentation
     _train_transforms = Compose([
         RandomResizedCrop(size),
         RandomHorizontalFlip(),
+        RandAugment(num_ops=2, magnitude=9),
         ToTensor(),
         normalize,
     ])
@@ -87,7 +91,7 @@ def main():
         num_labels=len(labels),
         id2label=id2label,
         label2id=label2id
-    ).to(device)
+    )
 
     # Metrics
     metric = evaluate.load("accuracy")
@@ -96,7 +100,7 @@ def main():
         predictions = np.argmax(predictions, axis=1)
         return metric.compute(predictions=predictions, references=labels)
 
-    # Training arguments
+    # Training arguments with DDP and Logging
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         remove_unused_columns=False,
@@ -112,6 +116,9 @@ def main():
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         push_to_hub=False,
+        report_to=args.report_to,
+        ddp_find_unused_parameters=False, # Optimized for DDP
+        fp16=torch.cuda.is_available(),    # Enable FP16 if CUDA is available
     )
 
     # Initialize Trainer
